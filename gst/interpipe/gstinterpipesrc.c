@@ -60,7 +60,8 @@ enum
   PROP_ALLOW_RENEGOTIATION,
   PROP_STREAM_SYNC,
   PROP_ACCEPT_EVENTS,
-  PROP_ACCEPT_EOS_EVENT
+  PROP_ACCEPT_EOS_EVENT,
+  PROP_TS_OFFSET
 };
 
 static void gst_inter_pipe_src_set_property (GObject * object, guint prop_id,
@@ -154,6 +155,9 @@ struct _GstInterPipeSrc
 
   /* Accept end of stream event */
   gboolean accept_eos_event;
+
+  /* Correct the resulting buffers PTS by a fixed amount */
+  gint64 ts_offset;
 };
 
 struct _GstInterPipeSrcClass
@@ -222,6 +226,10 @@ gst_inter_pipe_src_class_init (GstInterPipeSrcClass * klass)
           "Accept the EOS event received from the interpipesink only if it "
           "is set to true", TRUE, G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
 
+  g_object_class_install_property (gobject_class, PROP_TS_OFFSET,
+      g_param_spec_int64("ts-offset", "Timestamp Offset",
+        "Correct outgoing buffers PTS and DTS", G_MININT64, G_MAXINT64, 0, G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
+
   basesrc_class->start = GST_DEBUG_FUNCPTR (gst_inter_pipe_src_start);
   basesrc_class->stop = GST_DEBUG_FUNCPTR (gst_inter_pipe_src_stop);
   basesrc_class->event = GST_DEBUG_FUNCPTR (gst_inter_pipe_src_event);
@@ -242,6 +250,7 @@ gst_inter_pipe_src_init (GstInterPipeSrc * src)
   src->stream_sync = GST_INTER_PIPE_SRC_PASSTHROUGH_TIMESTAMP;
   src->accept_events = TRUE;
   src->accept_eos_event = TRUE;
+  src->ts_offset = 0;
 }
 
 static void
@@ -314,6 +323,9 @@ gst_inter_pipe_src_set_property (GObject * object, guint prop_id,
     case PROP_ACCEPT_EOS_EVENT:
       src->accept_eos_event = g_value_get_boolean (value);
       break;
+    case PROP_TS_OFFSET:
+      src->ts_offset = g_value_get_int64(value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -348,6 +360,9 @@ gst_inter_pipe_src_get_property (GObject * object, guint prop_id,
       break;
     case PROP_ACCEPT_EOS_EVENT:
       g_value_set_boolean (value, src->accept_eos_event);
+      break;
+    case PROP_TS_OFFSET:
+      g_value_set_int64(value, src->ts_offset);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -683,6 +698,9 @@ gst_inter_pipe_src_push_buffer (GstInterPipeIListener * iface,
     GST_BUFFER_PTS (buffer) = GST_CLOCK_TIME_NONE;
     GST_BUFFER_DTS (buffer) = GST_CLOCK_TIME_NONE;
   }
+
+  GST_BUFFER_PTS(buffer) += src->ts_offset;
+  GST_BUFFER_DTS(buffer) += src->ts_offset;
 
   ret = gst_app_src_push_buffer (appsrc, buffer);
   if (ret != GST_FLOW_OK)
